@@ -3,7 +3,7 @@ import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import Layout from "@theme/Layout";
 import HomepageFeatures from "@site/src/components/HomepageFeatures";
-
+import ChatWidget from '@site/src/components/ChatWidget';
 import Heading from "@theme/Heading";
 import styles from "./index.module.css";
 
@@ -114,6 +114,7 @@ export default function Home() {
         </section>
         <HomepageFeatures />
       </main>
+      <ChatWidget />
     </Layout>
   );
 }
