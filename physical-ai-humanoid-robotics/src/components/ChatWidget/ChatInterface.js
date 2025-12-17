@@ -27,7 +27,7 @@ export default function ChatInterface({ onClose }) {
     setLoading(true);
 
     try {
-      const backendUrl =  'https://muhammadsaad16-chatbott.hf.space';
+      const backendUrl =  'https://hamzabhatti-chatbot.hf.space/';
       console.log('Sending request to:', `${backendUrl}/api/chat`);
       
       const response = await fetch(`${backendUrl}/api/chat`, {
