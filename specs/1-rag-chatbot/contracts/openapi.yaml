@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: RAG Chatbot API
+  description: |
+    API for the RAG (Retrieval-Augmented Generation) chatbot integrated with the
+    Physical AI & Humanoid Robotics Docusaurus book. Enables natural language queries
+    with citation-backed responses from book content.
+  version: 1.0.0
+  contact:
+    name: Physical AI & Humanoid Robotics Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://api-rag.example.com
+    description: Production server (placeholder)
+
+tags:
+  - name: chat
+    description: Query and feedback operations
+  - name: admin
+    description: Administrative operations
+
+paths:
+  /api/chat/query:
+    post:
+      tags:
+        - chat
+      summary: Submit a query and receive RAG response
+      description: |
+        Process a natural language query about book content using RAG pipeline:
+        1. Generate query embedding
+        2. Search Qdrant for top-N relevant chunks
+        3. Generate response using Gemini with retrieved context
+        4. Return response with citations
+
+        Supports two query modes:
+        - Mode A (Full Book): Search all indexed content
+        - Mode B (Selected Text): Use highlighted text as additional context
+      operationId: chatQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+            examples:
+              simple_query:
+                summary: Simple query without history
+                value:
+                  query: "What is ROS 2?"
+                  history: []
+                  selected_text: null
+              with_history:
+                summary: Follow-up query with conversation history
+                value:
+                  query: "How do I install it?"
+                  history:
+                    - role: user
+                      content: "What is NVIDIA Isaac?"
+                    - role: assistant
+                      content: "NVIDIA Isaac is a platform for robotics simulation..."
+                      sources:
+                        - module: "module-3-nvidia-isaac"
+                          section: "week-8-intro"
+                          url: "/module-3-nvidia-isaac/week-8-intro"
+                  selected_text: null
+              with_selected_text:
+                summary: Query with highlighted text (Mode B)
+                value:
+                  query: "Simplify this explanation"
+                  history: []
+                  selected_text: "ROS 2 uses a Data Distribution Service (DDS) middleware for real-time communication between nodes..."
+      responses:
+        '200':
+          description: Successful query processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+              examples:
+                success:
+                  summary: Successful response with citations
+                  value:
+                    response: "ROS 2 (Robot Operating System 2) is the next-generation robot middleware that provides communication, device drivers, and tools for building robot applications..."
+                    sources:
+                      - module: "module-1-ros2"
+                        section: "week-1-intro"
+                        url: "/module-1-ros2/week-1-intro"
+                        relevance_score: 0.92
+                      - module: "module-1-ros2"
+                        section: "week-3-fundamentals"
+                        url: "/module-1-ros2/week-3-fundamentals"
+                        relevance_score: 0.78
+        '400':
+          description: Bad request (invalid input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                empty_query:
+                  value:
+                    detail: "Query cannot be empty or whitespace only"
+                query_too_long:
+                  value:
+                    detail: "Query exceeds maximum length of 2000 characters"
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Rate limit exceeded. Please try again in a moment."
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Failed to process query. Please try again."
+
+  /api/chat/feedback:
+    post:
+      tags:
+        - chat
+      summary: Submit feedback on a chatbot response
+      description: |
+        Store user feedback (thumbs up/down and optional comment) for a query/response pair.
+        Used for quality monitoring and continuous improvement.
+      operationId: submitFeedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackRequest'
+            examples:
+              positive_feedback:
+                summary: Thumbs up with comment
+                value:
+                  query: "What is ROS 2?"
+                  response: "ROS 2 is the next-generation robot middleware..."
+                  selected_text: null
+                  rating: 1
+                  comment: "Very clear and helpful!"
+                  session_id: "abc123def456"
+                  sources:
+                    - module: "module-1-ros2"
+                      section: "week-1-intro"
+                      url: "/module-1-ros2/week-1-intro"
+              negative_feedback:
+                summary: Thumbs down with reason
+                value:
+                  query: "Explain DDS communication"
+                  response: "DDS uses a publish-subscribe model..."
+                  selected_text: null
+                  rating: -1
+                  comment: "Too technical, needs more beginner-friendly explanation"
+                  session_id: "abc123def456"
+                  sources:
+                    - module: "module-1-ros2"
+                      section: "week-3-fundamentals"
+                      url: "/module-1-ros2/week-3-fundamentals"
+      responses:
+        '200':
+          description: Feedback stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Feedback received. Thank you!"
+                  feedback_id:
+                    type: string
+                    format: uuid
+                    example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          description: Bad request (invalid feedback data)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Rating must be 1 (thumbs up) or -1 (thumbs down)"
+        '500':
+          description: Failed to store feedback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Failed to store feedback. Please try again."
+
+  /api/health:
+    get:
+      tags:
+        - admin
+      summary: Health check endpoint
+      description: |
+        Returns system health status including:
+        - API service availability
+        - Qdrant connection status
+        - Neon Postgres connection status
+        - Gemini API connectivity
+      operationId: healthCheck
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "healthy"
+                timestamp: "2025-12-15T10:30:00Z"
+                services:
+                  qdrant: "connected"
+                  postgres: "connected"
+                  gemini: "connected"
+                version: "1.0.0"
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "unhealthy"
+                timestamp: "2025-12-15T10:30:00Z"
+                services:
+                  qdrant: "connected"
+                  postgres: "error: connection timeout"
+                  gemini: "connected"
+                version: "1.0.0"
+
+  /api/index/refresh:
+    post:
+      tags:
+        - admin
+      summary: Trigger book content re-indexing
+      description: |
+        Re-index all markdown files from the book's docs/ directory.
+        This operation:
+        1. Deletes existing Qdrant collection
+        2. Recreates collection with same config
+        3. Parses all markdown files
+        4. Generates embeddings for chunks
+        5. Uploads to Qdrant
+
+        **Warning**: This operation may take 5-10 minutes for full book re-indexing.
+      operationId: refreshIndex
+      responses:
+        '202':
+          description: Indexing job started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Indexing started"
+                  job_id:
+                    type: string
+                    format: uuid
+                    example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                  estimated_duration:
+                    type: string
+                    example: "5-10 minutes"
+        '500':
+          description: Failed to start indexing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: "Failed to start indexing job"
+
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: User's natural language question about book content
+          minLength: 1
+          maxLength: 2000
+          example: "How do ROS 2 nodes communicate?"
+        history:
+          type: array
+          description: Previous conversation messages for context (max 10)
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          default: []
+        selected_text:
+          type: string
+          nullable: true
+          description: Highlighted text from book (Mode B query)
+          maxLength: 5000
+          example: null
+
+    QueryResponse:
+      type: object
+      required:
+        - response
+        - sources
+      properties:
+        response:
+          type: string
+          description: Generated answer from chatbot
+          minLength: 1
+          example: "ROS 2 nodes communicate using DDS (Data Distribution Service)..."
+        sources:
+          type: array
+          description: Citations with links to book content
+          items:
+            $ref: '#/components/schemas/Source'
+
+    ChatMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+          description: Message sender
+          example: "user"
+        content:
+          type: string
+          description: Message text
+          minLength: 1
+          maxLength: 10000
+          example: "What is ROS 2?"
+        sources:
+          type: array
+          description: Citations (only for assistant messages)
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Source'
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+          description: When message was sent
+          example: "2025-12-15T10:30:00Z"
+
+    Source:
+      type: object
+      required:
+        - module
+        - section
+        - url
+      properties:
+        module:
+          type: string
+          description: Module name (e.g., "module-1-ros2")
+          pattern: "^module-\\d+-[\\w-]+$"
+          example: "module-1-ros2"
+        section:
+          type: string
+          description: Section/chapter name
+          example: "week-3-fundamentals"
+        url:
+          type: string
+          description: Relative URL path to book content
+          pattern: "^/.*"
+          example: "/module-1-ros2/week-3-fundamentals"
+        relevance_score:
+          type: number
+          format: float
+          nullable: true
+          description: Similarity score from Qdrant search (0.0-1.0)
+          minimum: 0.0
+          maximum: 1.0
+          example: 0.87
+
+    FeedbackRequest:
+      type: object
+      required:
+        - query
+        - response
+        - rating
+      properties:
+        query:
+          type: string
+          description: Original user question
+          minLength: 1
+          maxLength: 2000
+          example: "How do ROS 2 nodes communicate?"
+        response:
+          type: string
+          description: Chatbot's answer
+          minLength: 1
+          example: "ROS 2 nodes communicate using DDS..."
+        selected_text:
+          type: string
+          nullable: true
+          description: Highlighted text context (if Mode B query)
+          maxLength: 5000
+          example: null
+        rating:
+          type: integer
+          description: "1 for thumbs up, -1 for thumbs down"
+          enum: [1, -1]
+          example: 1
+        comment:
+          type: string
+          nullable: true
+          description: Optional written feedback from user
+          maxLength: 1000
+          example: "Very helpful explanation!"
+        session_id:
+          type: string
+          nullable: true
+          description: Browser session identifier (for grouping)
+          maxLength: 255
+          example: "abc123def456"
+        sources:
+          type: array
+          nullable: true
+          description: Citations that were shown with the response
+          items:
+            $ref: '#/components/schemas/Source'
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - timestamp
+        - services
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Overall system health
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          description: When health check was performed
+          example: "2025-12-15T10:30:00Z"
+        services:
+          type: object
+          description: Status of individual services
+          properties:
+            qdrant:
+              type: string
+              description: Qdrant connection status
+              example: "connected"
+            postgres:
+              type: string
+              description: Neon Postgres connection status
+              example: "connected"
+            gemini:
+              type: string
+              description: Gemini API connectivity status
+              example: "connected"
+          required:
+            - qdrant
+            - postgres
+            - gemini
+        version:
+          type: string
+          description: API version
+          example: "1.0.0"
+
+    Error:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message
+          example: "Failed to process query. Please try again."
+        error_code:
+          type: string
+          nullable: true
+          description: Machine-readable error code (optional)
+          example: "GEMINI_RATE_LIMIT"
+
+  securitySchemes: {}
+
+security: []
